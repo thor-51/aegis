@@ -1,0 +1,11 @@
+gymnasium>=0.29
+networkx>=3.0
+numpy>=1.24
+pytest>=7.4
+
+# Phase 2+ — learned agents & uncertainty module
+stable-baselines3>=2.0
+torch>=2.0
+
+# Phase 6 — plots for the write-up (uncomment as needed)
+# matplotlib>=3.8
