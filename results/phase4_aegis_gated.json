@@ -1,0 +1,45 @@
+[
+  {
+    "avg_reward": 1.379444642857143,
+    "avg_availability": 0.9118749999999999,
+    "bad_action_rate": 0.317,
+    "avg_blast_radius_of_bad_actions": 0.4026315647163427,
+    "agent": "random"
+  },
+  {
+    "avg_reward": 1.7445546875000002,
+    "avg_availability": 0.9352812499999998,
+    "bad_action_rate": 0.0,
+    "avg_blast_radius_of_bad_actions": 0.0,
+    "agent": "rule_based"
+  },
+  {
+    "avg_reward": 1.4786350000000001,
+    "avg_availability": 0.9283125,
+    "bad_action_rate": 0.32425000000000004,
+    "avg_blast_radius_of_bad_actions": 0.4377435285680308,
+    "agent": "dqn"
+  },
+  {
+    "avg_reward": 1.6310487500000002,
+    "avg_availability": 0.8991875,
+    "bad_action_rate": 0.0,
+    "avg_blast_radius_of_bad_actions": 0.0,
+    "agent": "ppo"
+  },
+  {
+    "avg_reward": 1.6653152232142863,
+    "avg_availability": 0.9286874999999999,
+    "bad_action_rate": 0.07849999999999999,
+    "avg_blast_radius_of_bad_actions": 0.3161302982731554,
+    "agent": "bootstrap_dqn"
+  },
+  {
+    "avg_reward": 1.6834049553571429,
+    "avg_availability": 0.93203125,
+    "bad_action_rate": 0.06825,
+    "avg_blast_radius_of_bad_actions": 0.24986127318060086,
+    "override_rate": 0.042249999999999996,
+    "agent": "aegis_full"
+  }
+]
