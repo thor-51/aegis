@@ -18,13 +18,14 @@ for the "AEGIS-no-graph" ablation the README earmarks for Phase 6 --
 Phase 4 does not draw conclusions from that mode, it just makes the
 comparison possible later without new code.
 
-Fallback policy: Phase 5 owns building a purpose-built, blast-radius-aware
-conservative fallback. Until then this gate accepts *any* object with an
-.act(obs) method as its fallback -- run_comparison.py currently plugs in
-the Phase 1 RuleBasedAgent, since it's the only agent that already
-achieves bad_action_rate=0.000 in the Phase 2/3 results table, making it a
-reasonable interim "pre-approved recovery action" while Phase 5 is being
-built. This is a placeholder, not a design claim -- see agents/aegis_agent.py.
+Fallback policy: Phase 5's ConservativeFallback
+(aegis/agents/conservative_fallback.py) is the purpose-built,
+blast-radius-aware fallback that this gate delegates to on override. It
+adjusts action aggressiveness based on the target service's blast radius
+(hubs get only SCALE_UP/NOOP, leaves may get RESTART). This gate accepts
+*any* object with an .act(obs) method as its fallback, so tests and
+ablations (e.g. aegis_rule_fallback in run_comparison.py) can inject
+alternatives without touching the gate itself.
 """
 
 from __future__ import annotations

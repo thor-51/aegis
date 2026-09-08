@@ -86,10 +86,20 @@ def main():
 
         # Phase 4: the same policy, now gated. env.topology is a fresh
         # ServiceTopology per episode (env_factory reseeds it), so the
-        # agent -- and its RuleBasedAgent fallback -- must be constructed
-        # per episode too, same as every other agent here.
+        # agent -- and its fallback -- must be constructed per episode too,
+        # same as every other agent here.
+        # Phase 5: aegis_full now uses ConservativeFallback (the default).
         agents["aegis_full"] = (
             lambda env, m=bootstrap_model: AEGISAgent(policy=m, topology=env.topology)
+        )
+
+        # A/B comparison: same gate, but with the old Phase 1 RuleBasedAgent
+        # as fallback, so Phase 5's improvement can be isolated.
+        agents["aegis_rule_fallback"] = (
+            lambda env, m=bootstrap_model: AEGISAgent(
+                policy=m, topology=env.topology,
+                fallback=RuleBasedAgent(n_services=args.n_services),
+            )
         )
 
     all_results = []

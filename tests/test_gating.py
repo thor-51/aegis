@@ -152,11 +152,13 @@ def test_calibrate_confidence_threshold_returns_percentile_of_observed_scores():
 # --------------------------------------------------------------------- #
 # AEGISAgent (the composed, .act(obs)-compatible version)
 # --------------------------------------------------------------------- #
-def test_aegis_agent_defaults_to_rule_based_fallback():
+def test_aegis_agent_defaults_to_conservative_fallback():
     topo = ServiceTopology(n_services=4, seed=0)
     policy = _agent_with_fixed_uncertainty(score=0.99, action=3, n_actions=20)
     agent = AEGISAgent(policy=policy, topology=topo, confidence_threshold=0.1, blast_radius_threshold=-1.0)
-    assert isinstance(agent.fallback, RuleBasedAgent)
+
+    from aegis.agents.conservative_fallback import ConservativeFallback
+    assert isinstance(agent.fallback, ConservativeFallback)
 
 
 def test_aegis_agent_runs_full_episode_without_crashing():

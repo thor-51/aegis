@@ -27,8 +27,8 @@ letting the learned policy improvise.
 | **2** | Vanilla DQN / PPO agents on the simulator | ✅ done |
 | **2.5** | Blast-radius scoring wired into the simulator | ✅ done (see `aegis/env/topology.py`) |
 | **3** | Epistemic-uncertainty module (ensemble/bootstrap Q-heads) | ✅ done (see `aegis/uncertainty/`) |
-| **4** | Confidence + blast-radius gating logic ("AEGIS" proper) | ✅ done (see `aegis/gating/`) — fallback is Phase 1's RuleBasedAgent as a placeholder |
-| **5** | Conservative fallback policy (blast-radius-aware) | ⬜ next |
+| **4** | Confidence + blast-radius gating logic ("AEGIS" proper) | ✅ done (see `aegis/gating/`) |
+| **5** | Conservative fallback policy (blast-radius-aware) | ✅ done (see `aegis/agents/conservative_fallback.py`) |
 | **6** | OOD evaluation suite + ablations (rule-based vs DQN/PPO vs AEGIS-no-graph vs AEGIS-full) | ⬜ |
 | **7** | Real Kubernetes wiring (kind/minikube + Chaos Mesh + Locust), replacing the local simulator | ⬜ |
 | **8** | Write-up | ⬜ |
@@ -94,9 +94,9 @@ iff its uncertainty score exceeds a calibrated confidence threshold (0.42
 — the ~85th percentile of scores observed over 20 held-out calibration
 episodes, seeds disjoint from the eval seeds below) **and** the candidate
 action's target service has blast_radius > 0.5. On override, the action
-comes from Phase 1's `RuleBasedAgent` — a deliberate placeholder fallback
-until Phase 5 builds a purpose-built blast-radius-aware one (see
-`aegis_gate.py`'s docstring for the reasoning).
+comes from the gate's fallback policy (these results used Phase 1's
+`RuleBasedAgent`; Phase 5 has since replaced it with the blast-radius-aware
+`ConservativeFallback` — see below).
 
 | Agent | avg_reward | availability | bad_action_rate | avg_blast_radius_of_bad_actions | override_rate |
 |---|---|---|---|---|---|
@@ -116,12 +116,42 @@ successfully catching a meaningful fraction of the *highest-stakes* ones
 and routing them to the safe fallback instead — not just catching mistakes
 indiscriminately.
 
-Caveats worth being upfront about (this is exactly what Phase 6 is for):
-this is one seed-matched eval run, not a significance test; the fallback
-is a stand-in, not the real Phase 5 policy; and PPO already achieves
-bad_action_rate=0.000 in this particular simulator, so the harder,
-more interesting test is whether AEGIS holds up under the OOD scenarios
-Phase 6 introduces, where PPO's zero rate isn't guaranteed to survive.
+**Note**: the Phase 4 results above used Phase 1's `RuleBasedAgent` as
+the gate's fallback — a generic placeholder that didn't know about topology.
+Phase 5 has since replaced it with `ConservativeFallback`, a purpose-built
+blast-radius-aware fallback (see the Phase 5 section below). Re-running
+`run_comparison.py` with the new fallback will produce updated numbers.
+The more interesting question is whether AEGIS holds up under the OOD
+scenarios Phase 6 introduces, where PPO's zero bad-action rate isn't
+guaranteed to survive.
+
+---
+
+## Phase 5: conservative fallback
+
+Phase 4's gate proved that confidence + blast-radius gating catches the
+highest-stakes mistakes, but its fallback was a placeholder — Phase 1's
+generic `RuleBasedAgent`, which knows nothing about topology.
+
+Phase 5 replaces it with `ConservativeFallback`
+(`aegis/agents/conservative_fallback.py`): a purpose-built, interpretable
+policy that adjusts action aggressiveness based on the target service's
+blast radius:
+
+- **High blast-radius services (hubs)**: only `SCALE_UP` or `NOOP`. Never
+  `RESTART` or `MIGRATE` — the transient disruption cascades to all
+  dependents.
+- **Low blast-radius services (leaves)**: `RESTART` is allowed for genuine
+  errors (cheap on a leaf). `MIGRATE` is still avoided — it's the most
+  disruptive action at 0.15 churn penalty.
+
+This is deliberately hand-crafted and interpretable, NOT a second learned
+policy. The whole point of a fallback is predictability — learning a second
+policy would reintroduce the very uncertainty the gate is trying to escape.
+
+`run_comparison.py` now includes an `aegis_rule_fallback` entry (the old
+Phase 1 fallback) alongside `aegis_full` (now using `ConservativeFallback`)
+so the Phase 5 improvement can be isolated in A/B comparison.
 
 ---
 
@@ -135,7 +165,8 @@ aegis/
     sb3_env.py             # stable-baselines3 wrapper (Monitor, TimeLimit)
   agents/
     random_agent.py        # sanity-check floor
-    rule_based.py           # HPA-style threshold baseline; also Phase 4's placeholder gate fallback
+    rule_based.py           # HPA-style threshold baseline
+    conservative_fallback.py # Phase 5: blast-radius-aware fallback for the AEGIS gate
     learned_agent.py        # wraps a trained SB3 model in the same .act() interface
     uncertainty_agent.py    # wraps BootstrappedDQN in the same .act() interface (ungated)
     aegis_agent.py           # composes policy + gate + fallback into the same .act() interface
