@@ -8,3 +8,4 @@ results/*.json
 !results/.gitkeep
 .DS_Store
 models/*.zip
+venv/
