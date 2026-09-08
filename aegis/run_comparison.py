@@ -21,8 +21,10 @@ import numpy as np
 from aegis.agents.learned_agent import LearnedAgent
 from aegis.agents.random_agent import RandomAgent
 from aegis.agents.rule_based import RuleBasedAgent
+from aegis.agents.uncertainty_agent import UncertaintyAgent
 from aegis.env.microservice_env import MicroserviceEnv
 from aegis.run_baselines import run_agent_suite
+from aegis.uncertainty.bootstrapped_dqn import BootstrappedDQN
 
 
 def try_load_learned(algo: str, model_dir: Path):
@@ -36,6 +38,15 @@ def try_load_learned(algo: str, model_dir: Path):
     cls = {"dqn": DQN, "ppo": PPO}[algo]
     model = cls.load(path)
     return model
+
+
+def try_load_bootstrapped_dqn(model_dir: Path):
+    path = model_dir / "bootstrapped_dqn_microservice.pt"
+    if not path.exists():
+        print(f"[skip] BOOTSTRAP_DQN: no trained model found at {path} "
+              f"(run `python -m aegis.train_uncertainty` first)")
+        return None
+    return BootstrappedDQN.load(path)
 
 
 def main():
@@ -62,6 +73,14 @@ def main():
         model = try_load_learned(algo, model_dir)
         if model is not None:
             agents[algo] = (lambda env, m=model: LearnedAgent(m))
+
+    # Phase 3: bootstrap-head DQN, *ungated* -- takes the mean-Q greedy
+    # action across all heads and ignores its own uncertainty estimate.
+    # This is the fair baseline for Phase 4's gated AEGIS to beat: same
+    # underlying policy, no confidence/blast-radius override.
+    bootstrap_model = try_load_bootstrapped_dqn(model_dir)
+    if bootstrap_model is not None:
+        agents["bootstrap_dqn"] = (lambda env, m=bootstrap_model: UncertaintyAgent(m))
 
     all_results = []
     for name, factory in agents.items():

@@ -26,8 +26,8 @@ letting the learned policy improvise.
 | **1** | Simulator + baselines (rule-based, random) | ✅ done |
 | **2** | Vanilla DQN / PPO agents on the simulator | ✅ done |
 | **2.5** | Blast-radius scoring wired into the simulator | ✅ done (see `aegis/env/topology.py`) |
-| **3** | Epistemic-uncertainty module (ensemble/bootstrap Q-heads) | ⬜ next |
-| **4** | Confidence + blast-radius gating logic ("AEGIS" proper) | ⬜ |
+| **3** | Epistemic-uncertainty module (ensemble/bootstrap Q-heads) | ✅ done (see `aegis/uncertainty/`) |
+| **4** | Confidence + blast-radius gating logic ("AEGIS" proper) | ⬜ next |
 | **5** | Conservative fallback policy (blast-radius-aware) | ⬜ |
 | **6** | OOD evaluation suite + ablations (rule-based vs DQN/PPO vs AEGIS-no-graph vs AEGIS-full) | ⬜ |
 | **7** | Real Kubernetes wiring (kind/minikube + Chaos Mesh + Locust), replacing the local simulator | ⬜ |
@@ -54,6 +54,35 @@ PPO happened to learn to avoid this in this run — that's not guaranteed to
 hold under harder/OOD scenarios (Phase 6), which is precisely what needs
 testing once the uncertainty module exists.
 
+---
+
+## Phase 3 results (20 eval episodes, 8 services, seed-matched)
+
+`bootstrap_dqn` below is the ensemble/bootstrap-head DQN from
+`aegis/uncertainty/`, run **ungated** — it just takes the mean-Q greedy
+action across all K heads and ignores its own `.uncertainty()` estimate.
+That's deliberate: it isolates what the bootstrap-head architecture itself
+buys before Phase 4 adds the confidence + blast-radius gate on top, so any
+further improvement from "AEGIS proper" can be attributed to the gate
+rather than to a different underlying policy.
+
+| Agent | avg_reward | availability | bad_action_rate | avg_blast_radius_of_bad_actions |
+|---|---|---|---|---|
+| random | +1.379 | 0.912 | 0.317 | 0.403 |
+| rule_based | +1.745 | 0.935 | **0.000** | 0.000 |
+| DQN | +1.479 | 0.928 | 0.324 | 0.438 |
+| PPO | +1.631 | 0.899 | **0.000** | 0.000 |
+| bootstrap_dqn (ungated) | +1.665 | 0.929 | 0.078 | 0.316 |
+
+Even without any gating, `bootstrap_dqn` already cuts `bad_action_rate`
+roughly 4x versus vanilla DQN (0.078 vs 0.324) and lowers
+`avg_blast_radius_of_bad_actions` (0.316 vs 0.438), while matching or
+beating DQN/PPO on reward and availability. This is consistent with
+Bootstrapped-DQN-style ensembling acting as an implicit regularizer even
+before its uncertainty signal is used for anything — a useful sanity check,
+but not the actual claim of the project. The mistakes it still makes
+(bad_action_rate=0.078, not 0) are exactly the states Phase 4's gate needs
+to catch and route to a conservative fallback instead.
 
 ---
 
@@ -66,16 +95,23 @@ aegis/
     microservice_env.py   # Gymnasium environment (the "simulator")
     sb3_env.py             # stable-baselines3 wrapper (Monitor, TimeLimit)
   agents/
-    random_agent.py       # sanity-check floor
-    rule_based.py          # HPA-style threshold baseline
-    learned_agent.py       # wraps a trained SB3 model in the same .act() interface
+    random_agent.py        # sanity-check floor
+    rule_based.py           # HPA-style threshold baseline
+    learned_agent.py        # wraps a trained SB3 model in the same .act() interface
+    uncertainty_agent.py    # wraps BootstrappedDQN in the same .act() interface (ungated)
+  uncertainty/
+    ensemble_qnet.py         # shared trunk + K independent Q-heads
+    replay_buffer.py         # bootstrap-masked experience replay
+    bootstrapped_dqn.py      # training loop + .act() / .uncertainty() for Phase 3/4
   run_baselines.py         # Phase 1 comparison script (random vs rule-based)
   train_learned.py         # Phase 2: train DQN / PPO on the simulator
-  run_comparison.py        # Phase 2: compare all four agents head-to-head
+  train_uncertainty.py     # Phase 3: train the bootstrap-head DQN
+  run_comparison.py        # Phase 2/3: compare all agents (incl. bootstrap_dqn) head-to-head
 tests/
   test_env.py
+  test_uncertainty.py
 results/                   # metric dumps land here (gitignored except .gitkeep)
-models/                    # trained SB3 models land here (gitignored)
+models/                    # trained SB3 / BootstrappedDQN checkpoints land here (gitignored)
 ```
 
 ## Getting started
@@ -90,6 +126,9 @@ PYTHONPATH=. python -m aegis.run_baselines --episodes 20 --n-services 8
 # Phase 2: train DQN and PPO, then compare all four agents
 PYTHONPATH=. python -m aegis.train_learned --algo dqn --timesteps 40000
 PYTHONPATH=. python -m aegis.train_learned --algo ppo --timesteps 40000
+
+# Phase 3: train the bootstrap-head DQN (ungated), then compare all five agents
+PYTHONPATH=. python -m aegis.train_uncertainty --timesteps 40000
 PYTHONPATH=. python -m aegis.run_comparison --episodes 20 --n-services 8
 ```
 
