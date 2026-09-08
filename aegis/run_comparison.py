@@ -1,10 +1,11 @@
 """
-run_comparison.py — Phase 2 deliverable: evaluate rule-based, random, DQN,
-and PPO agents on identical episodes and report the same metrics for all
-four, so results are directly comparable.
+run_comparison.py — evaluate all agents built so far (random, rule-based,
+DQN, PPO, bootstrap_dqn, aegis_full) on identical episodes and report the
+same metrics for each, so results are directly comparable.
 
-Assumes DQN/PPO were already trained via train_learned.py (models/*.zip).
-Missing models are skipped with a warning rather than failing the run.
+Assumes DQN/PPO/bootstrap_dqn were already trained via train_learned.py /
+train_uncertainty.py (models/*.zip, models/*.pt). Missing models are
+skipped with a warning rather than failing the run.
 
 Usage:
     python -m aegis.run_comparison --episodes 20 --n-services 8
@@ -18,6 +19,7 @@ from pathlib import Path
 
 import numpy as np
 
+from aegis.agents.aegis_agent import AEGISAgent
 from aegis.agents.learned_agent import LearnedAgent
 from aegis.agents.random_agent import RandomAgent
 from aegis.agents.rule_based import RuleBasedAgent
@@ -82,16 +84,27 @@ def main():
     if bootstrap_model is not None:
         agents["bootstrap_dqn"] = (lambda env, m=bootstrap_model: UncertaintyAgent(m))
 
+        # Phase 4: the same policy, now gated. env.topology is a fresh
+        # ServiceTopology per episode (env_factory reseeds it), so the
+        # agent -- and its RuleBasedAgent fallback -- must be constructed
+        # per episode too, same as every other agent here.
+        agents["aegis_full"] = (
+            lambda env, m=bootstrap_model: AEGISAgent(policy=m, topology=env.topology)
+        )
+
     all_results = []
     for name, factory in agents.items():
         agg = run_agent_suite(name, factory, env_factory, args.episodes)
         all_results.append(agg)
-        print(
+        line = (
             f"{name:>12s} | avg_reward={agg['avg_reward']:+.3f} "
             f"| availability={agg['avg_availability']:.3f} "
             f"| bad_action_rate={agg['bad_action_rate']:.3f} "
             f"| avg_blast_radius_of_bad_actions={agg['avg_blast_radius_of_bad_actions']:.3f}"
         )
+        if "override_rate" in agg:
+            line += f" | override_rate={agg['override_rate']:.3f}"
+        print(line)
 
     out_path = Path(args.out)
     out_path.parent.mkdir(parents=True, exist_ok=True)

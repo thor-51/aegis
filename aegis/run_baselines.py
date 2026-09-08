@@ -37,12 +37,20 @@ def run_episode(env: MicroserviceEnv, agent, seed: int) -> dict:
         if info["bad_action"]:
             blast_radii.append(info["blast_radius_of_bad_action"])
 
-    return {
+    result = {
         "avg_reward": float(np.mean(rewards)),
         "avg_availability": float(np.mean(availabilities)),
         "bad_action_rate": float(np.mean(bad_actions)),
         "avg_blast_radius_of_bad_actions": float(np.mean(blast_radii)) if blast_radii else 0.0,
     }
+    # Gated agents (Phase 4's AEGISAgent) expose how often they overrode
+    # the learned policy; plain agents don't have this attribute, so it's
+    # only added to the result when present -- run_agent_suite aggregates
+    # whatever keys results[0] happens to have, so this stays backward
+    # compatible with every other agent.
+    if hasattr(agent, "override_rate"):
+        result["override_rate"] = agent.override_rate
+    return result
 
 
 def run_agent_suite(agent_name: str, agent_factory, env_factory, episodes: int) -> dict:

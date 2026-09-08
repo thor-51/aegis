@@ -27,8 +27,8 @@ letting the learned policy improvise.
 | **2** | Vanilla DQN / PPO agents on the simulator | ✅ done |
 | **2.5** | Blast-radius scoring wired into the simulator | ✅ done (see `aegis/env/topology.py`) |
 | **3** | Epistemic-uncertainty module (ensemble/bootstrap Q-heads) | ✅ done (see `aegis/uncertainty/`) |
-| **4** | Confidence + blast-radius gating logic ("AEGIS" proper) | ⬜ next |
-| **5** | Conservative fallback policy (blast-radius-aware) | ⬜ |
+| **4** | Confidence + blast-radius gating logic ("AEGIS" proper) | ✅ done (see `aegis/gating/`) — fallback is Phase 1's RuleBasedAgent as a placeholder |
+| **5** | Conservative fallback policy (blast-radius-aware) | ⬜ next |
 | **6** | OOD evaluation suite + ablations (rule-based vs DQN/PPO vs AEGIS-no-graph vs AEGIS-full) | ⬜ |
 | **7** | Real Kubernetes wiring (kind/minikube + Chaos Mesh + Locust), replacing the local simulator | ⬜ |
 | **8** | Write-up | ⬜ |
@@ -86,6 +86,45 @@ to catch and route to a conservative fallback instead.
 
 ---
 
+## Phase 4 results (20 eval episodes, 8 services, seed-matched)
+
+`aegis_full` = the Phase 3 `bootstrap_dqn` policy wrapped in Phase 4's
+`AEGISGate` (`aegis/gating/aegis_gate.py`): override the policy's action
+iff its uncertainty score exceeds a calibrated confidence threshold (0.42
+— the ~85th percentile of scores observed over 20 held-out calibration
+episodes, seeds disjoint from the eval seeds below) **and** the candidate
+action's target service has blast_radius > 0.5. On override, the action
+comes from Phase 1's `RuleBasedAgent` — a deliberate placeholder fallback
+until Phase 5 builds a purpose-built blast-radius-aware one (see
+`aegis_gate.py`'s docstring for the reasoning).
+
+| Agent | avg_reward | availability | bad_action_rate | avg_blast_radius_of_bad_actions | override_rate |
+|---|---|---|---|---|---|
+| DQN | +1.479 | 0.928 | 0.324 | 0.438 | — |
+| PPO | +1.631 | 0.899 | **0.000** | 0.000 | — |
+| bootstrap_dqn (ungated) | +1.665 | 0.929 | 0.078 | 0.316 | — |
+| **aegis_full (gated)** | **+1.683** | **0.932** | **0.068** | **0.250** | 0.042 |
+
+This is the result the whole project is built to produce:
+`avg_blast_radius_of_bad_actions` — the metric the README's "metric that
+matters most" section calls out — drops from 0.316 (same policy, ungated)
+to **0.250** once the gate is switched on, while intervening on only
+**4.2%** of decisions and without giving up reward or availability. In
+other words: on the rare occasions this policy would otherwise take a
+disruptive action on a service it's genuinely unsure about, the gate is
+successfully catching a meaningful fraction of the *highest-stakes* ones
+and routing them to the safe fallback instead — not just catching mistakes
+indiscriminately.
+
+Caveats worth being upfront about (this is exactly what Phase 6 is for):
+this is one seed-matched eval run, not a significance test; the fallback
+is a stand-in, not the real Phase 5 policy; and PPO already achieves
+bad_action_rate=0.000 in this particular simulator, so the harder,
+more interesting test is whether AEGIS holds up under the OOD scenarios
+Phase 6 introduces, where PPO's zero rate isn't guaranteed to survive.
+
+---
+
 ## Repo layout
 
 ```
@@ -96,20 +135,24 @@ aegis/
     sb3_env.py             # stable-baselines3 wrapper (Monitor, TimeLimit)
   agents/
     random_agent.py        # sanity-check floor
-    rule_based.py           # HPA-style threshold baseline
+    rule_based.py           # HPA-style threshold baseline; also Phase 4's placeholder gate fallback
     learned_agent.py        # wraps a trained SB3 model in the same .act() interface
     uncertainty_agent.py    # wraps BootstrappedDQN in the same .act() interface (ungated)
+    aegis_agent.py           # composes policy + gate + fallback into the same .act() interface
   uncertainty/
     ensemble_qnet.py         # shared trunk + K independent Q-heads
     replay_buffer.py         # bootstrap-masked experience replay
     bootstrapped_dqn.py      # training loop + .act() / .uncertainty() for Phase 3/4
+  gating/
+    aegis_gate.py             # Phase 4: confidence + blast-radius override decision rule
   run_baselines.py         # Phase 1 comparison script (random vs rule-based)
   train_learned.py         # Phase 2: train DQN / PPO on the simulator
   train_uncertainty.py     # Phase 3: train the bootstrap-head DQN
-  run_comparison.py        # Phase 2/3: compare all agents (incl. bootstrap_dqn) head-to-head
+  run_comparison.py        # Phase 2-4: compare all agents (incl. aegis_full) head-to-head
 tests/
   test_env.py
   test_uncertainty.py
+  test_gating.py
 results/                   # metric dumps land here (gitignored except .gitkeep)
 models/                    # trained SB3 / BootstrappedDQN checkpoints land here (gitignored)
 ```
@@ -127,8 +170,11 @@ PYTHONPATH=. python -m aegis.run_baselines --episodes 20 --n-services 8
 PYTHONPATH=. python -m aegis.train_learned --algo dqn --timesteps 40000
 PYTHONPATH=. python -m aegis.train_learned --algo ppo --timesteps 40000
 
-# Phase 3: train the bootstrap-head DQN (ungated), then compare all five agents
+# Phase 3: train the bootstrap-head DQN (ungated)
 PYTHONPATH=. python -m aegis.train_uncertainty --timesteps 40000
+
+# Phase 4: no separate training step -- the gate wraps the Phase 3 checkpoint.
+# This now compares all six agents, including aegis_full.
 PYTHONPATH=. python -m aegis.run_comparison --episodes 20 --n-services 8
 ```
 
@@ -150,3 +196,9 @@ cost) — but the metric this project's novelty claim lives or dies on is
 central/high-impact was the service it messed up on? AEGIS should be the
 only agent that keeps this number low even when its overall bad-action
 rate isn't zero.
+
+As of Phase 4, `aegis_full` is the first agent to actually demonstrate
+this: 0.250 vs 0.316 for the same policy ungated (see "Phase 4 results"
+above) — a real, if modest and not-yet-stress-tested, improvement on
+exactly this number. Phase 6's OOD suite is what will show whether that
+holds up outside this simulator's in-distribution fault patterns.
