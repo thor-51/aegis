@@ -59,11 +59,14 @@ class ServiceState:
 
 @dataclass
 class FaultConfig:
-    # Fault types this environment can inject. Kept simple in Phase 1;
-    # Phase 4 (OOD evaluation) will add *novel combinations* not seen here.
+    # Fault types this environment can inject. Phase 6 adds "network_partition"
+    # as a novel OOD fault type not seen during training.
     types: tuple[str, ...] = ("cpu_spike", "latency_spike", "crash_loop", "mem_leak")
     prob_per_step: float = 0.03
     duration_range: tuple[int, int] = (5, 20)
+    # Phase 6 OOD knobs (defaults preserve original behavior):
+    fault_target_bias: float = 0.0       # 0=uniform, 1=always target highest-BR service
+    simultaneous_fault_prob: float = 0.0  # probability of hitting multiple services per fault event
 
 
 class MicroserviceEnv(gym.Env):
@@ -144,6 +147,18 @@ class MicroserviceEnv(gym.Env):
     # ------------------------------------------------------------------ #
     # Internal dynamics
     # ------------------------------------------------------------------ #
+    def _pick_fault_target(self) -> int:
+        """Pick a service to inject a fault on, respecting fault_target_bias."""
+        bias = self.fault_config.fault_target_bias
+        if bias > 0.0 and self.rng.random() < bias:
+            # Bias toward high-blast-radius services
+            br = self.topology.blast_radius_vector()
+            # Softmax-ish: weight by blast radius, pick proportionally
+            weights = br + 1e-6  # avoid all-zero
+            weights = weights / weights.sum()
+            return int(self.rng.choice(self.n_services, p=weights))
+        return int(self.rng.integers(self.n_services))
+
     def _apply_traffic_and_faults(self):
         # Baseline traffic fluctuation (diurnal-ish noise)
         for s in self.services:
@@ -154,15 +169,24 @@ class MicroserviceEnv(gym.Env):
         # Random fault injection
         self.steps_since_fault += 1
         if self.rng.random() < self.fault_config.prob_per_step:
-            target = int(self.rng.integers(self.n_services))
+            target = self._pick_fault_target()
             fault_type = self.rng.choice(self.fault_config.types)
             duration = int(self.rng.integers(*self.fault_config.duration_range))
             self.services[target].fault_active = str(fault_type)
             self.services[target].fault_ttl = duration
             self.steps_since_fault = 0
 
+            # Simultaneous faults: chance of hitting additional services
+            if self.fault_config.simultaneous_fault_prob > 0.0:
+                for other in range(self.n_services):
+                    if other != target and self.rng.random() < self.fault_config.simultaneous_fault_prob:
+                        other_fault = self.rng.choice(self.fault_config.types)
+                        other_dur = int(self.rng.integers(*self.fault_config.duration_range))
+                        self.services[other].fault_active = str(other_fault)
+                        self.services[other].fault_ttl = other_dur
+
         # Apply active faults
-        for s in self.services:
+        for s_id, s in enumerate(self.services):
             if s.fault_active and s.fault_ttl > 0:
                 if s.fault_active == "cpu_spike":
                     s.cpu_util = min(1.0, s.cpu_util + 0.4)
@@ -172,6 +196,15 @@ class MicroserviceEnv(gym.Env):
                     s.error_rate = min(1.0, s.error_rate + 0.5)
                 elif s.fault_active == "mem_leak":
                     s.mem_util = min(1.0, s.mem_util + 0.05)
+                elif s.fault_active == "network_partition":
+                    # The service itself may look fine, but its dependents
+                    # (callers) see elevated latency + errors — simulating
+                    # a communication breakdown. This is a novel fault
+                    # signature the training-time agents haven't seen.
+                    for caller_id in self.topology.dependents(s_id):
+                        caller = self.services[caller_id]
+                        caller.latency = min(2000.0, caller.latency + 150)
+                        caller.error_rate = min(1.0, caller.error_rate + 0.15)
                 s.fault_ttl -= 1
                 if s.fault_ttl <= 0:
                     s.fault_active = None

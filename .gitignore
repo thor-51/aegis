@@ -5,7 +5,9 @@ __pycache__/
 venv/
 *.egg-info/
 results/*.json
+results/plots/
 !results/.gitkeep
 .DS_Store
-models/*.zip
+models/*
+!models/.gitkeep
 venv/
