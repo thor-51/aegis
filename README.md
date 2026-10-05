@@ -294,15 +294,16 @@ kubectl apply -f deploy/manifests/microservices.yaml
 PYTHONPATH=. python -m aegis.eval_k8s --episodes 5
 ```
 
-## Why a custom simulator instead of real Kubernetes right away
+## Why a custom simulator first, and the transition to Kubernetes
 
-The real target evaluation environment is a Kubernetes cluster (kind/minikube)
-with Chaos Mesh for fault injection and Locust for traffic — that's Phase 7.
+The target evaluation environment was a live Kubernetes cluster (kind/minikube)
+with Chaos Mesh for fault injection and Locust for traffic — accomplished in Phase 7.
 Building the RL agent, the uncertainty module, and the confidence/blast-radius
-gating logic against a fast local simulator first lets those pieces get
-iterated on in seconds instead of minutes, and the `MicroserviceEnv` /
-`ServiceTopology` interfaces are designed to be swapped for a real
-K8s-backed environment later without touching the agent code.
+gating logic against a fast local simulator first let those pieces get
+iterated on in seconds instead of minutes. Because the `MicroserviceEnv` and
+`ServiceTopology` interfaces were designed cleanly from Day 1, they were directly
+mirrored into `K8sMicroserviceEnv` and `aegis/k8s/` in Phase 7 without modifying
+the core agent policies.
 
 ## The metric that matters most
 
