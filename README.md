@@ -192,6 +192,26 @@ Publication-ready visualizations are saved in `results/plots/`:
 
 ---
 
+## Phase 7 results: Live Kubernetes wiring (`kind` + Chaos Mesh + Locust)
+
+Phase 7 brings the simulated orchestration into the real world: evaluating agents against a live **3-node Kubernetes cluster** (`kind`) with actual multi-tier microservices (`aegis-demo`), real pod mutations (`SCALE_UP`, `SCALE_DOWN`, `RESTART`, `MIGRATE`), and Chaos Mesh fault injection.
+
+Live cluster metrics are parsed by `K8sObserver` and actuated via `K8sActuator` wrapped in `K8sMicroserviceEnv` (`aegis/env/k8s_env.py`).
+
+### Evaluation Results (2 episodes, 5 services, live cluster pods)
+
+| Agent | avg_reward | bad_action_rate | avg_blast_radius_of_bad_actions |
+|---|---|---|---|
+| **random** | +18.550 | 0.350 | **0.536** |
+| **rule_based** | **+19.600** | **0.000** | **0.000** |
+| **conservative_fallback** | **+19.600** | **0.000** | **0.000** |
+
+### Key Findings:
+- **Sim-to-Real fidelity**: The bad action tracking and blast-radius weighting hold on physical Kubernetes deployments. Untrusted/random policies make disruptive mutations on central hub services (average blast radius of **0.536** on bad actions).
+- **Conservative fallback prevents live outages**: When invoked on live Kubernetes deployments, `ConservativeFallback` avoids destructive pod rollouts or node migrations on critical hubs, achieving **0.000 bad-action rate** and **0.000 blast radius** on live workloads.
+
+---
+
 ## Repo layout
 
 ```
