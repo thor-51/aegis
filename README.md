@@ -31,7 +31,7 @@ letting the learned policy improvise.
 | **5** | Conservative fallback policy (blast-radius-aware) | ✅ done (see `aegis/agents/conservative_fallback.py`) |
 | **6** | OOD evaluation suite + ablations (rule-based vs DQN/PPO vs AEGIS-no-graph vs AEGIS-full) | ✅ done (see `results/phase6_ood.json` and `results/plots/`) |
 | **7** | Real Kubernetes wiring (kind/minikube + Chaos Mesh + Locust), replacing the local simulator | ✅ done (see `aegis/k8s/`, `aegis/env/k8s_env.py`, `results/phase7_k8s.json`) |
-| **8** | Write-up | ⬜ |
+| **8** | Write-up | ✅ done (see `WRITEUP.md`) |
 
 ---
 
