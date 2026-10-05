@@ -1,0 +1,224 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: aegis-demo
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: service-auth
+  namespace: aegis-demo
+  labels:
+    app: service-auth
+    tier: hub
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: service-auth
+  template:
+    metadata:
+      labels:
+        app: service-auth
+    spec:
+      containers:
+        - name: app
+          image: hashicorp/http-echo:0.2.3
+          args: ["-text=auth-ok", "-listen=:8080"]
+          ports:
+            - containerPort: 8080
+          resources:
+            requests:
+              cpu: "50m"
+              memory: "64Mi"
+            limits:
+              cpu: "200m"
+              memory: "128Mi"
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: service-auth
+  namespace: aegis-demo
+spec:
+  selector:
+    app: service-auth
+  ports:
+    - port: 8080
+      targetPort: 8080
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: service-db
+  namespace: aegis-demo
+  labels:
+    app: service-db
+    tier: hub
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: service-db
+  template:
+    metadata:
+      labels:
+        app: service-db
+    spec:
+      containers:
+        - name: app
+          image: hashicorp/http-echo:0.2.3
+          args: ["-text=db-ok", "-listen=:8080"]
+          ports:
+            - containerPort: 8080
+          resources:
+            requests:
+              cpu: "50m"
+              memory: "64Mi"
+            limits:
+              cpu: "200m"
+              memory: "128Mi"
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: service-db
+  namespace: aegis-demo
+spec:
+  selector:
+    app: service-db
+  ports:
+    - port: 8080
+      targetPort: 8080
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: service-api
+  namespace: aegis-demo
+  labels:
+    app: service-api
+    tier: mid
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: service-api
+  template:
+    metadata:
+      labels:
+        app: service-api
+    spec:
+      containers:
+        - name: app
+          image: hashicorp/http-echo:0.2.3
+          args: ["-text=api-ok", "-listen=:8080"]
+          ports:
+            - containerPort: 8080
+          resources:
+            requests:
+              cpu: "50m"
+              memory: "64Mi"
+            limits:
+              cpu: "200m"
+              memory: "128Mi"
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: service-api
+  namespace: aegis-demo
+spec:
+  selector:
+    app: service-api
+  ports:
+    - port: 8080
+      targetPort: 8080
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: service-worker
+  namespace: aegis-demo
+  labels:
+    app: service-worker
+    tier: mid
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: service-worker
+  template:
+    metadata:
+      labels:
+        app: service-worker
+    spec:
+      containers:
+        - name: app
+          image: hashicorp/http-echo:0.2.3
+          args: ["-text=worker-ok", "-listen=:8080"]
+          ports:
+            - containerPort: 8080
+          resources:
+            requests:
+              cpu: "50m"
+              memory: "64Mi"
+            limits:
+              cpu: "200m"
+              memory: "128Mi"
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: service-worker
+  namespace: aegis-demo
+spec:
+  selector:
+    app: service-worker
+  ports:
+    - port: 8080
+      targetPort: 8080
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: service-cache
+  namespace: aegis-demo
+  labels:
+    app: service-cache
+    tier: leaf
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: service-cache
+  template:
+    metadata:
+      labels:
+        app: service-cache
+    spec:
+      containers:
+        - name: app
+          image: hashicorp/http-echo:0.2.3
+          args: ["-text=cache-ok", "-listen=:8080"]
+          ports:
+            - containerPort: 8080
+          resources:
+            requests:
+              cpu: "50m"
+              memory: "64Mi"
+            limits:
+              cpu: "200m"
+              memory: "128Mi"
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: service-cache
+  namespace: aegis-demo
+spec:
+  selector:
+    app: service-cache
+  ports:
+    - port: 8080
+      targetPort: 8080

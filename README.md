@@ -30,7 +30,7 @@ letting the learned policy improvise.
 | **4** | Confidence + blast-radius gating logic ("AEGIS" proper) | ✅ done (see `aegis/gating/`) |
 | **5** | Conservative fallback policy (blast-radius-aware) | ✅ done (see `aegis/agents/conservative_fallback.py`) |
 | **6** | OOD evaluation suite + ablations (rule-based vs DQN/PPO vs AEGIS-no-graph vs AEGIS-full) | ✅ done (see `results/phase6_ood.json` and `results/plots/`) |
-| **7** | Real Kubernetes wiring (kind/minikube + Chaos Mesh + Locust), replacing the local simulator | ⬜ |
+| **7** | Real Kubernetes wiring (kind/minikube + Chaos Mesh + Locust), replacing the local simulator | ✅ done (see `aegis/k8s/`, `aegis/env/k8s_env.py`, `results/phase7_k8s.json`) |
 | **8** | Write-up | ⬜ |
 
 ---
@@ -199,6 +199,7 @@ aegis/
   env/
     topology.py           # service dependency graph + blast-radius scoring
     microservice_env.py   # Gymnasium environment with OOD fault injection
+    k8s_env.py            # Phase 7: Gymnasium environment backed by live Kubernetes
     sb3_env.py             # stable-baselines3 wrapper (Monitor, TimeLimit)
   agents/
     random_agent.py        # sanity-check floor
@@ -213,20 +214,33 @@ aegis/
     bootstrapped_dqn.py      # training loop + .act() / .uncertainty() for Phase 3/4
   gating/
     aegis_gate.py             # Phase 4: confidence + blast-radius override decision rule
+  k8s/
+    actuator.py              # Phase 7: K8s API mutator (scale, restart, migrate)
+    observer.py              # Phase 7: Prometheus + K8s metrics scraper
+    chaos_controller.py      # Phase 7: Chaos Mesh fault injection manager
   run_baselines.py         # Phase 1 comparison script (random vs rule-based)
   train_learned.py         # Phase 2: train DQN / PPO on the simulator
   train_uncertainty.py     # Phase 3: train the bootstrap-head DQN
   run_comparison.py        # Phase 2-4: compare all agents (incl. aegis_full) head-to-head
   eval_ood.py              # Phase 6: evaluate all agents across in-distribution & OOD scenarios
   plot_ood_results.py      # Phase 6: publication-ready plots and heatmaps
+  eval_k8s.py              # Phase 7: evaluate agents against real Kubernetes cluster
+deploy/                    # Phase 7 cluster & testbed manifests
+  kind-config.yaml         # 3-node kind cluster configuration
+  manifests/
+    microservices.yaml     # 5-service demo deployment
+  locust/
+    locustfile.py          # load generator script
 tests/
   test_env.py
   test_uncertainty.py
   test_gating.py
   test_conservative_fallback.py
   test_ood.py              # Phase 6 OOD fault mechanisms unit tests
+  test_k8s_env.py          # Phase 7 Kubernetes environment unit tests
 results/                   # metric dumps & figures land here
   phase6_ood.json
+  phase7_k8s.json
   plots/
 models/                    # trained SB3 / BootstrappedDQN checkpoints land here (gitignored)
 ```
@@ -253,6 +267,11 @@ PYTHONPATH=. python -m aegis.run_comparison --episodes 20 --n-services 8
 # Phase 6: run full OOD stress-test suite & generate publication plots
 PYTHONPATH=. python -m aegis.eval_ood --episodes 20 --n-services 8
 PYTHONPATH=. python -m aegis.plot_ood_results
+
+# Phase 7: spin up kind cluster and evaluate on live Kubernetes
+kind create cluster --config deploy/kind-config.yaml --name aegis-cluster
+kubectl apply -f deploy/manifests/microservices.yaml
+PYTHONPATH=. python -m aegis.eval_k8s --episodes 5
 ```
 
 ## Why a custom simulator instead of real Kubernetes right away

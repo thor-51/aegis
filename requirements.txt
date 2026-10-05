@@ -9,3 +9,8 @@ torch>=2.0
 
 # Phase 6 — plots for the write-up (uncomment as needed)
 # matplotlib>=3.8
+
+# Phase 7 — Kubernetes, Prometheus, Chaos Mesh, Locust
+kubernetes>=28.0.0
+prometheus-api-client>=0.5.5
+locust>=2.20.0
