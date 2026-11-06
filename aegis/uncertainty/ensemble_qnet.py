@@ -27,29 +27,48 @@ class EnsembleQNetwork(nn.Module):
         n_heads: int = 8,
         trunk_hidden: int = 128,
         head_hidden: int = 64,
+        shared_trunk: bool = True,
     ):
         super().__init__()
         self.n_heads = n_heads
         self.n_actions = n_actions
+        self.shared_trunk = shared_trunk
 
-        self.trunk = nn.Sequential(
-            nn.Linear(obs_dim, trunk_hidden),
-            nn.ReLU(),
-            nn.Linear(trunk_hidden, trunk_hidden),
-            nn.ReLU(),
-        )
-        self.heads = nn.ModuleList(
-            [
-                nn.Sequential(
-                    nn.Linear(trunk_hidden, head_hidden),
-                    nn.ReLU(),
-                    nn.Linear(head_hidden, n_actions),
-                )
-                for _ in range(n_heads)
-            ]
-        )
+        if shared_trunk:
+            self.trunk = nn.Sequential(
+                nn.Linear(obs_dim, trunk_hidden),
+                nn.ReLU(),
+                nn.Linear(trunk_hidden, trunk_hidden),
+                nn.ReLU(),
+            )
+            self.heads = nn.ModuleList(
+                [
+                    nn.Sequential(
+                        nn.Linear(trunk_hidden, head_hidden),
+                        nn.ReLU(),
+                        nn.Linear(head_hidden, n_actions),
+                    )
+                    for _ in range(n_heads)
+                ]
+            )
+        else:
+            self.trunk = None
+            self.heads = nn.ModuleList(
+                [
+                    nn.Sequential(
+                        nn.Linear(obs_dim, trunk_hidden),
+                        nn.ReLU(),
+                        nn.Linear(trunk_hidden, head_hidden),
+                        nn.ReLU(),
+                        nn.Linear(head_hidden, n_actions),
+                    )
+                    for _ in range(n_heads)
+                ]
+            )
 
     def forward(self, obs: torch.Tensor) -> torch.Tensor:
         """Returns Q-values of shape (n_heads, batch, n_actions)."""
-        feat = self.trunk(obs)
-        return torch.stack([head(feat) for head in self.heads], dim=0)
+        if self.shared_trunk and self.trunk is not None:
+            feat = self.trunk(obs)
+            return torch.stack([head(feat) for head in self.heads], dim=0)
+        return torch.stack([head(obs) for head in self.heads], dim=0)

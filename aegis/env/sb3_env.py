@@ -13,9 +13,19 @@ from stable_baselines3.common.monitor import Monitor
 from aegis.env.microservice_env import MicroserviceEnv
 
 
-def make_env(n_services: int = 8, episode_length: int = 200, seed: int | None = None):
+def make_env(
+    n_services: int = 8,
+    episode_length: int = 200,
+    seed: int | None = None,
+    bad_action_penalty_scale: float = 1.0,
+):
     def _init():
-        env = MicroserviceEnv(n_services=n_services, episode_length=episode_length, seed=seed)
+        env = MicroserviceEnv(
+            n_services=n_services,
+            episode_length=episode_length,
+            seed=seed,
+            bad_action_penalty_scale=bad_action_penalty_scale,
+        )
         env = TimeLimit(env, max_episode_steps=episode_length)
         env = Monitor(env)
         return env

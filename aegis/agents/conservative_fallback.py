@@ -82,9 +82,15 @@ class ConservativeFallback:
             return 0  # noop on service 0
 
         else:
-            # LOW blast radius — allow restart for genuine errors.
-            if has_error:
+            # LOW blast radius — allow restart for genuine local errors,
+            # but if a downstream dependency is also degraded, avoid restarting
+            # the caller (use SCALE_UP instead to absorb cascaded pressure).
+            dep_degraded = any(
+                per_service[d, 3] > 0.1 or per_service[d, 2] > self.lat_threshold
+                for d in self.topology.dependencies(target_service)
+            )
+            if has_error and not dep_degraded:
                 return target_service * N_ACTION_TYPES + ActionType.RESTART
-            if has_cpu_pressure or has_latency_issue:
+            if has_cpu_pressure or has_latency_issue or has_error:
                 return target_service * N_ACTION_TYPES + ActionType.SCALE_UP
             return 0  # noop on service 0

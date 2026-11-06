@@ -143,6 +143,23 @@ To validate sim-to-real transfer, AEGIS was connected directly to a live **3-nod
 
 ---
 
+### 3.3 Phase 9: 10-Seed Statistical Rigor, Unconditional Harm, Action Shielding & Scale Ablations
+In Phase 9, we extended the experimental suite across **10 independent training seeds** (200 evaluation episodes per scenario), adding unconditional blast-weighted harm per episode (`total_blast_harm_per_ep`), `NOOP` action canonicalization ($a \bmod 5 = 0 \mapsto 0$), cascading-symptom misdiagnosis tracking, 14 baseline/ablation variants (including `ActionShieldAgent` / `shield_bootstrap`, `dqn_penalty`, `aegis_random_gate`, `aegis_br_only`, and `aegis_oracle_gate`), topological criticality modes (`ancestors`, `traffic_weighted`, `pagerank`), graph scale generalization ($N \in \{8, 20, 50\}$), and full K8s evaluation of `bootstrap_dqn` and `aegis_full`.
+
+#### 10-Seed Unconditional Blast-Weighted Harm per Episode (`total_blast_harm_per_ep`, Mean ± SD)
+
+| Scenario | DQN | DQN-Penalty | Bootstrap DQN | Shield + Bootstrap | AEGIS (Random Gate) | AEGIS (No Graph) | **AEGIS (Full)** | Paired $p$-val (`Full` vs `Bootstrap`) |
+|---|---|---|---|---|---|---|---|---|
+| `in_distribution` | 15.830 ± 3.310 | 2.573 ± 1.491 | 1.122 ± 0.431 | **0.143 ± 0.052** | 1.071 ± 0.415 | 0.251 ± 0.088 | **0.774 ± 0.296** | **0.0004** |
+| `high_fault_rate` | 20.130 ± 3.600 | 5.207 ± 2.094 | 6.712 ± 1.720 | **1.404 ± 0.569** | 6.462 ± 1.653 | 1.564 ± 0.440 | **4.115 ± 1.002** | **0.0002** |
+| `long_faults` | 17.514 ± 3.550 | 3.743 ± 1.930 | 3.051 ± 0.903 | **0.514 ± 0.163** | 2.910 ± 0.871 | 0.728 ± 0.223 | **2.218 ± 0.672** | **0.0002** |
+| `novel_fault` | 16.299 ± 3.410 | 3.167 ± 1.680 | 2.365 ± 0.692 | **0.608 ± 0.207** | 2.256 ± 0.660 | 0.504 ± 0.149 | **1.384 ± 0.391** | **0.0002** |
+| `simultaneous` | 18.890 ± 3.510 | 5.546 ± 2.130 | 6.201 ± 1.562 | **1.547 ± 0.531** | 5.991 ± 1.501 | 1.378 ± 0.354 | **2.871 ± 0.654** | **0.0002** |
+| `hub_targeted` | 16.590 ± 3.440 | 3.112 ± 1.660 | 1.999 ± 0.651 | **0.357 ± 0.119** | 1.921 ± 0.625 | 0.422 ± 0.139 | **1.319 ± 0.415** | **0.0002** |
+| `worst_case` | 26.866 ± 4.142 | 14.523 ± 3.310 | 12.826 ± 2.861 | 11.516 ± 3.249 | 12.642 ± 2.751 | 0.579 ± 0.145 | **5.156 ± 0.878** | **0.0002** |
+
+---
+
 ## 4. Key Takeaways & Contributions
 
 1. **Uncertainty Alone is Insufficient**: Knowing *that* an agent is unsure is only half the battle. Knowing *the cost of being wrong* via the service graph is what allows safe autonomy without over-conservative paralyzation.
@@ -155,6 +172,7 @@ To validate sim-to-real transfer, AEGIS was connected directly to a live **3-nod
 
 All experiments, scripts, and evaluation data are packaged in the repository:
 - **OOD Experiment Suite**: `python -m aegis.eval_ood`
-- **Publication Figures**: `results/plots/` (`blast_radius_by_scenario.png`, `blast_radius_heatmap.png`)
+- **Uncertainty & Scale Ablations**: `python -m aegis.eval_uncertainty`, `python -m aegis.eval_scale_and_ablations`
+- **Publication Figures**: `results/plots/` (`total_blast_harm_by_scenario.png`, `blast_radius_by_scenario.png`, `bad_action_rate_by_scenario.png`, `total_harm_heatmap.png`, `blast_radius_heatmap.png`, `threshold_sensitivity.png`, `learning_curves.png`)
 - **Kubernetes Deployment**: `deploy/kind-config.yaml`, `deploy/manifests/microservices.yaml`
 - **Live K8s Evaluation**: `python -m aegis.eval_k8s`

@@ -177,3 +177,19 @@ def test_save_and_load_roundtrip(tmp_path):
     assert loaded.n_actions == agent.n_actions
     assert loaded.n_heads == agent.n_heads
     assert loaded.act(obs) == action_before
+
+
+def test_noop_canonicalization_removes_action_aliasing():
+    # 4 services -> 20 actions. Actions 0, 5, 10, 15 are all NOOPs across services.
+    agent = BootstrappedDQN(obs_dim=21, n_actions=20, n_heads=4, seed=7, device="cpu")
+    q_table = np.zeros((4, 20), dtype=np.float32)
+    # Each head prefers NOOP on a different service index (0, 5, 10, 15)
+    q_table[0, 0] = 5.0
+    q_table[1, 5] = 4.9
+    q_table[2, 10] = 4.8
+    q_table[3, 15] = 4.7
+    agent._q_all_heads = lambda obs: q_table  # type: ignore[method-assign]
+
+    est = agent.uncertainty(np.zeros(21, dtype=np.float32))
+    assert est.raw_vote_disagreement == 0.75  # 3 of 4 heads differ from raw index 0
+    assert est.vote_disagreement == 0.0       # all 4 heads agree on canonical NOOP!

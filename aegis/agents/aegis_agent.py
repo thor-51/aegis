@@ -34,6 +34,10 @@ class AEGISAgent:
         confidence_threshold: float = DEFAULT_CONFIDENCE_THRESHOLD,
         blast_radius_threshold: float = DEFAULT_BLAST_RADIUS_THRESHOLD,
         use_blast_radius: bool = True,
+        gate_mode: str = "conjunctive",
+        random_override_prob: float = 0.05,
+        oracle_fn=None,
+        seed: int = 0,
     ):
         self.fallback = fallback or ConservativeFallback(
             n_services=topology.n_services, topology=topology,
@@ -45,6 +49,10 @@ class AEGISAgent:
             confidence_threshold=confidence_threshold,
             blast_radius_threshold=blast_radius_threshold,
             use_blast_radius=use_blast_radius,
+            gate_mode=gate_mode,
+            random_override_prob=random_override_prob,
+            oracle_fn=oracle_fn,
+            seed=seed,
         )
 
     def act(self, obs: np.ndarray) -> int:

@@ -35,6 +35,18 @@ class UncertaintyEstimate:
     q_std_per_action: np.ndarray    # (n_actions,) std across heads, per action
     vote_disagreement: float        # fraction of heads whose greedy action != majority action
     score: float                    # single scalar in [0, 1] combining the two signals above
+    raw_vote_disagreement: float = 0.0  # un-canonicalized disagreement (for ablation)
+
+
+def canonicalize_action(action: int, n_action_types: int = 5) -> int:
+    """
+    Map functionally equivalent NOOP actions across services (service_id * 5 + 0)
+    to a single canonical action index (0) so heads voting for NOOP on different
+    service indices do not register as artificial disagreement (action aliasing).
+    """
+    if int(action) % n_action_types == 0:
+        return 0
+    return int(action)
 
 
 class BootstrappedDQN:
@@ -51,6 +63,8 @@ class BootstrappedDQN:
         target_update_interval: int = 500,
         seed: int | None = None,
         device: str | None = None,
+        canonicalize_noop: bool = True,
+        shared_trunk: bool = True,
     ):
         self.obs_dim = obs_dim
         self.n_actions = n_actions
@@ -58,14 +72,20 @@ class BootstrappedDQN:
         self.gamma = gamma
         self.batch_size = batch_size
         self.target_update_interval = target_update_interval
+        self.canonicalize_noop = canonicalize_noop
+        self.shared_trunk = shared_trunk
         self.device = torch.device(device or ("cuda" if torch.cuda.is_available() else "cpu"))
 
         if seed is not None:
             torch.manual_seed(seed)
         self.rng = np.random.default_rng(seed)
 
-        self.q_net = EnsembleQNetwork(obs_dim, n_actions, n_heads=n_heads).to(self.device)
-        self.target_net = EnsembleQNetwork(obs_dim, n_actions, n_heads=n_heads).to(self.device)
+        self.q_net = EnsembleQNetwork(
+            obs_dim, n_actions, n_heads=n_heads, shared_trunk=shared_trunk
+        ).to(self.device)
+        self.target_net = EnsembleQNetwork(
+            obs_dim, n_actions, n_heads=n_heads, shared_trunk=shared_trunk
+        ).to(self.device)
         self.target_net.load_state_dict(self.q_net.state_dict())
         self.target_net.eval()
 
@@ -75,6 +95,11 @@ class BootstrappedDQN:
         )
 
         self._train_steps = 0
+        self.training_history: dict[str, list[float]] = {
+            "episode_rewards": [],
+            "episode_bad_action_rates": [],
+            "losses": [],
+        }
 
     # ------------------------------------------------------------------ #
     # Inference
@@ -117,12 +142,19 @@ class BootstrappedDQN:
 
         action = int(np.argmax(q_mean))
         greedy_per_head = np.argmax(q, axis=1)  # (K,)
-        vote_disagreement = float(np.mean(greedy_per_head != action))
+        raw_vote_disagreement = float(np.mean(greedy_per_head != action))
+
+        if self.canonicalize_noop and self.n_actions > 5:
+            canon_action = canonicalize_action(action)
+            canon_greedy = np.array([canonicalize_action(int(a)) for a in greedy_per_head])
+            vote_disagreement = float(np.mean(canon_greedy != canon_action))
+        else:
+            vote_disagreement = raw_vote_disagreement
 
         # Normalize q_std for the chosen action against the spread of
-        # mean-Q across actions, so the score is roughly scale-free
-        # instead of tracking this env's particular reward magnitude.
-        q_range = float(q_mean.max() - q_mean.min()) + 1e-6
+        # mean-Q across actions, capped at 1.0 so severe OOD states with
+        # wide negative Q-value spread do not artificially shrink norm_q_std.
+        q_range = min(1.0, float(q_mean.max() - q_mean.min())) + 1e-6
         norm_q_std = float(np.clip(q_std_per_action[action] / q_range, 0.0, 1.0))
 
         score = float(np.clip(0.5 * norm_q_std + 0.5 * vote_disagreement, 0.0, 1.0))
@@ -133,6 +165,7 @@ class BootstrappedDQN:
             q_std_per_action=q_std_per_action,
             vote_disagreement=vote_disagreement,
             score=score,
+            raw_vote_disagreement=raw_vote_disagreement,
         )
 
     # ------------------------------------------------------------------ #
@@ -187,19 +220,23 @@ class BootstrappedDQN:
         current_head = int(self.rng.integers(self.n_heads))
         losses: list[float] = []
         episode_rewards: list[float] = []
+        episode_bad_rates: list[float] = []
         ep_reward = 0.0
+        ep_bad: list[float] = []
 
         for t in range(total_timesteps):
             frac = min(1.0, t / max(1, int(exploration_fraction * total_timesteps)))
             epsilon = 1.0 + frac * (exploration_final_eps - 1.0)
 
             action = self.act(obs, head=current_head, epsilon=epsilon)
-            next_obs, reward, terminated, truncated, _info = env.step(action)
+            next_obs, reward, terminated, truncated, info = env.step(action)
             done = terminated or truncated
 
             self.buffer.add(obs, action, reward, next_obs, done)
             obs = next_obs
             ep_reward += reward
+            if isinstance(info, dict) and "bad_action" in info:
+                ep_bad.append(float(info["bad_action"]))
 
             if t >= learning_starts and t % train_freq == 0:
                 loss = self._train_step()
@@ -208,9 +245,12 @@ class BootstrappedDQN:
 
             if done:
                 episode_rewards.append(ep_reward)
+                if ep_bad:
+                    episode_bad_rates.append(float(np.mean(ep_bad)))
                 obs, _ = env.reset()
                 current_head = int(self.rng.integers(self.n_heads))  # new episode, new "personality"
                 ep_reward = 0.0
+                ep_bad = []
 
             if (t + 1) % log_interval == 0:
                 avg_loss = float(np.mean(losses[-200:])) if losses else float("nan")
@@ -219,6 +259,13 @@ class BootstrappedDQN:
                     f"step={t + 1}/{total_timesteps} eps={epsilon:.3f} "
                     f"recent_loss={avg_loss:.4f} recent_ep_reward={avg_ep_reward:+.3f}"
                 )
+
+        self.training_history = {
+            "episode_rewards": [float(r) for r in episode_rewards],
+            "episode_bad_action_rates": [float(b) for b in episode_bad_rates],
+            "losses": [float(l) for l in losses],
+        }
+        return self.training_history
 
     # ------------------------------------------------------------------ #
     # Persistence
@@ -233,6 +280,7 @@ class BootstrappedDQN:
                 "obs_dim": int(self.obs_dim),
                 "n_actions": int(self.n_actions),
                 "n_heads": int(self.n_heads),
+                "shared_trunk": bool(self.shared_trunk),
                 "state_dict": self.q_net.state_dict(),
             },
             path,
@@ -248,6 +296,7 @@ class BootstrappedDQN:
             obs_dim=ckpt["obs_dim"],
             n_actions=ckpt["n_actions"],
             n_heads=ckpt["n_heads"],
+            shared_trunk=ckpt.get("shared_trunk", True),
             device=device,
         )
         agent.q_net.load_state_dict(ckpt["state_dict"])

@@ -24,13 +24,30 @@ class ServiceTopology:
     Directed graph: edge (A -> B) means "A calls B" (A depends on B).
     Blast radius of B = how many services would notice if B breaks,
     i.e. how many nodes can reach B (B's ancestors / callers, transitively).
+
+    Supports multiple criticality definitions (`criticality_mode`):
+      - "ancestors": unweighted fraction of transitive callers |Ancestors(v)| / (|V|-1)
+      - "traffic_weighted": callers weighted by synthetic per-service request traffic weights
+      - "pagerank": reverse-graph PageRank centrality normalized to [0, 1]
     """
 
-    def __init__(self, n_services: int, edge_prob: float = 0.25, seed: int | None = None):
+    def __init__(
+        self,
+        n_services: int,
+        edge_prob: float = 0.25,
+        seed: int | None = None,
+        criticality_mode: str = "ancestors",
+    ):
         self.n_services = n_services
+        self.criticality_mode = criticality_mode
         self.rng = np.random.default_rng(seed)
         self.graph = self._generate_graph(n_services, edge_prob)
-        self._blast_radius_cache = self._compute_blast_radius()
+        # Assign synthetic request traffic weights in [0.5, 2.5] per service
+        self.traffic_weights = {
+            i: float(self.rng.uniform(0.5, 2.5)) for i in range(n_services)
+        }
+        self._blast_radius_cache = self._compute_blast_radius(mode=criticality_mode)
+        self._ancestor_blast_radius_cache = self._compute_blast_radius(mode="ancestors")
 
     def _generate_graph(self, n: int, edge_prob: float) -> nx.DiGraph:
         """
@@ -65,14 +82,40 @@ class ServiceTopology:
 
         return g
 
-    def _compute_blast_radius(self) -> dict[int, float]:
+    def _compute_blast_radius(self, mode: str = "ancestors") -> dict[int, float]:
         """
-        blast_radius[s] = (# services that transitively depend on s) / (n-1),
-        clipped to [0, 1]. A pure leaf (nobody depends on it) -> ~0.
-        A central hub (everyone depends on it) -> ~1.
+        Compute normalized criticality / blast-radius score in [0, 1] per service.
+        - "ancestors": (# services that transitively depend on s) / (n-1).
+        - "traffic_weighted": traffic-weighted fraction of transitive callers.
+        - "pagerank": PageRank centrality on the dependency graph normalized to [0, 1].
         """
         scores: dict[int, float] = {}
         n = self.n_services
+        if mode == "traffic_weighted":
+            total_traffic = sum(self.traffic_weights.values())
+            for s in self.graph.nodes:
+                ancestors = nx.ancestors(self.graph, s)
+                other_traffic = max(1e-6, total_traffic - self.traffic_weights[s])
+                scores[s] = float(
+                    np.clip(
+                        sum(self.traffic_weights[a] for a in ancestors) / other_traffic,
+                        0.0,
+                        1.0,
+                    )
+                )
+            return scores
+        if mode == "pagerank":
+            from networkx.algorithms.link_analysis.pagerank_alg import _pagerank_numpy
+
+            pr = _pagerank_numpy(self.graph, alpha=0.85)
+            pr_vals = list(pr.values())
+            lo, hi = min(pr_vals), max(pr_vals)
+            span = max(1e-6, hi - lo)
+            for s in self.graph.nodes:
+                scores[s] = float(np.clip((pr[s] - lo) / span, 0.0, 1.0))
+            return scores
+
+        # Default: unweighted ancestor fraction
         for s in self.graph.nodes:
             ancestors = nx.ancestors(self.graph, s)  # nodes that can reach s
             scores[s] = len(ancestors) / max(1, n - 1)

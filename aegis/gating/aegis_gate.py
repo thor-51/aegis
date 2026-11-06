@@ -76,6 +76,10 @@ class AEGISGate:
         confidence_threshold: float = DEFAULT_CONFIDENCE_THRESHOLD,
         blast_radius_threshold: float = DEFAULT_BLAST_RADIUS_THRESHOLD,
         use_blast_radius: bool = True,
+        gate_mode: str = "conjunctive",
+        random_override_prob: float = 0.05,
+        oracle_fn=None,
+        seed: int = 0,
     ):
         self.policy = policy
         self.fallback = fallback
@@ -83,6 +87,10 @@ class AEGISGate:
         self.confidence_threshold = confidence_threshold
         self.blast_radius_threshold = blast_radius_threshold
         self.use_blast_radius = use_blast_radius
+        self.gate_mode = gate_mode
+        self.random_override_prob = random_override_prob
+        self.oracle_fn = oracle_fn
+        self.rng = np.random.default_rng(seed)
 
         self.n_calls = 0
         self.n_overrides = 0
@@ -92,9 +100,20 @@ class AEGISGate:
         candidate_service = est.action // N_ACTION_TYPES
         br = self.topology.blast_radius(candidate_service)
 
-        low_confidence = est.score > self.confidence_threshold
-        high_stakes = (not self.use_blast_radius) or (br > self.blast_radius_threshold)
-        overridden = bool(low_confidence and high_stakes)
+        if self.gate_mode == "always_fallback":
+            overridden = True
+        elif self.gate_mode == "blast_radius_only":
+            overridden = bool(br > self.blast_radius_threshold)
+        elif self.gate_mode == "uncertainty_only":
+            overridden = bool(est.score > self.confidence_threshold)
+        elif self.gate_mode == "random":
+            overridden = bool(self.rng.random() < self.random_override_prob)
+        elif self.gate_mode == "oracle":
+            overridden = bool(self.oracle_fn(est.action)) if self.oracle_fn is not None else False
+        else:
+            low_confidence = est.score > self.confidence_threshold
+            high_stakes = (not self.use_blast_radius) or (br > self.blast_radius_threshold)
+            overridden = bool(low_confidence and high_stakes)
 
         self.n_calls += 1
         if overridden:

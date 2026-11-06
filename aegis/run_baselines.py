@@ -22,10 +22,30 @@ from aegis.agents.rule_based import RuleBasedAgent
 from aegis.env.microservice_env import MicroserviceEnv
 
 
+def _compute_mttr(sla_violations_per_step: list[int]) -> float:
+    """
+    Mean Time To Recovery (MTTR) in steps across outage streaks in an episode.
+    An outage streak starts when sla_violations > 0 and ends when it returns to 0
+    (or at episode end). If no SLA violations occur, MTTR is 0.0.
+    """
+    streaks: list[int] = []
+    cur = 0
+    for v in sla_violations_per_step:
+        if v > 0:
+            cur += 1
+        elif cur > 0:
+            streaks.append(cur)
+            cur = 0
+    if cur > 0:
+        streaks.append(cur)
+    return float(np.mean(streaks)) if streaks else 0.0
+
+
 def run_episode(env: MicroserviceEnv, agent, seed: int) -> dict:
     obs, _ = env.reset(seed=seed)
     done = False
     rewards, availabilities, bad_actions, blast_radii = [], [], [], []
+    blast_harms, downtimes, sla_rates, sla_counts, int_costs = [], [], [], [], []
 
     while not done:
         action = agent.act(obs)
@@ -34,6 +54,11 @@ def run_episode(env: MicroserviceEnv, agent, seed: int) -> dict:
         rewards.append(reward)
         availabilities.append(info["availability"])
         bad_actions.append(info["bad_action"])
+        blast_harms.append(info.get("blast_weighted_harm", info["blast_radius_of_bad_action"]))
+        downtimes.append(info.get("downtime", 1.0 if info["sla_violations"] > 0 else 0.0))
+        sla_counts.append(int(info["sla_violations"]))
+        sla_rates.append(info.get("sla_violation_rate", info["sla_violations"] / env.n_services))
+        int_costs.append(info.get("intervention_cost", 0.0))
         if info["bad_action"]:
             blast_radii.append(info["blast_radius_of_bad_action"])
 
@@ -41,9 +66,16 @@ def run_episode(env: MicroserviceEnv, agent, seed: int) -> dict:
         "avg_reward": float(np.mean(rewards)),
         "avg_availability": float(np.mean(availabilities)),
         "bad_action_rate": float(np.mean(bad_actions)),
+        "bad_actions_per_ep": float(np.sum(bad_actions)),
         "avg_blast_radius_of_bad_actions": float(np.mean(blast_radii)) if blast_radii else 0.0,
+        "total_blast_harm_per_ep": float(np.sum(blast_harms)),
+        "mean_blast_harm_per_step": float(np.mean(blast_harms)),
+        "downtime_rate": float(np.mean(downtimes)),
+        "sla_violation_rate": float(np.mean(sla_rates)),
+        "mttr": _compute_mttr(sla_counts),
+        "intervention_cost_per_ep": float(np.sum(int_costs)),
     }
-    # Gated agents (Phase 4's AEGISAgent) expose how often they overrode
+    # Gated agents (Phase 4's AEGISAgent, ActionShieldAgent) expose how often they overrode
     # the learned policy; plain agents don't have this attribute, so it's
     # only added to the result when present -- run_agent_suite aggregates
     # whatever keys results[0] happens to have, so this stays backward
@@ -53,18 +85,30 @@ def run_episode(env: MicroserviceEnv, agent, seed: int) -> dict:
     return result
 
 
-def run_agent_suite(agent_name: str, agent_factory, env_factory, episodes: int) -> dict:
+def run_agent_suite(
+    agent_name: str,
+    agent_factory,
+    env_factory,
+    episodes: int,
+    return_raw: bool = False,
+) -> dict:
     results = []
     for ep in range(episodes):
         env = env_factory(seed=ep)
         agent = agent_factory(env)
         results.append(run_episode(env, agent, seed=ep))
 
-    agg = {
-        k: float(np.mean([r[k] for r in results]))
-        for k in results[0].keys()
-    }
+    agg: dict[str, float | str | list] = {}
+    n = max(1, len(results))
+    for k in results[0].keys():
+        vals = np.array([r[k] for r in results], dtype=np.float64)
+        agg[k] = float(np.mean(vals))
+        agg[f"{k}_std"] = float(np.std(vals, ddof=1)) if n > 1 else 0.0
+        agg[f"{k}_ci95"] = float(1.96 * np.std(vals, ddof=1) / np.sqrt(n)) if n > 1 else 0.0
     agg["agent"] = agent_name
+    agg["n_episodes"] = n
+    if return_raw:
+        agg["episode_results"] = results
     return agg
 
 

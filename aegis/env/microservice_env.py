@@ -79,15 +79,20 @@ class MicroserviceEnv(gym.Env):
         edge_prob: float = 0.25,
         fault_config: FaultConfig | None = None,
         seed: int | None = None,
+        criticality_mode: str = "ancestors",
+        bad_action_penalty_scale: float = 1.0,
     ):
         super().__init__()
         self.n_services = n_services
         self.episode_length = episode_length
         self.fault_config = fault_config or FaultConfig()
         self._seed = seed
+        self.bad_action_penalty_scale = bad_action_penalty_scale
         self.rng = np.random.default_rng(seed)
 
-        self.topology = ServiceTopology(n_services, edge_prob=edge_prob, seed=seed)
+        self.topology = ServiceTopology(
+            n_services, edge_prob=edge_prob, seed=seed, criticality_mode=criticality_mode
+        )
 
         self.action_space = spaces.Discrete(n_services * N_ACTION_TYPES)
         obs_dim = n_services * N_FEATURES_PER_SERVICE + 1
@@ -121,8 +126,7 @@ class MicroserviceEnv(gym.Env):
 
         self._apply_traffic_and_faults()
 
-        pre = self.services[service_id]
-        was_healthy = pre.latency < 150 and pre.error_rate < 0.1 and pre.fault_active is None
+        was_healthy = self._is_service_healthy(service_id)
 
         churn_penalty = self._apply_action(service_id, action_type)
         self._propagate_load()
@@ -252,6 +256,39 @@ class MicroserviceEnv(gym.Env):
                     caller.latency = min(2000.0, caller.latency + 20)
                     caller.error_rate = min(1.0, caller.error_rate + 0.03)
 
+    def _is_service_healthy(self, service_id: int) -> bool:
+        """
+        A service is considered healthy (not the root cause of a fault) if:
+          1. It has no active fault and its local telemetry is normal
+             (latency < 150ms and error_rate < 0.1), OR
+          2. It has no active fault (`fault_active is None`) and its elevated
+             latency/error is a cascaded symptom from a faulty downstream
+             dependency (`any(dep.fault_active is not None)`).
+        Restarting or migrating a fault-free upstream caller during a downstream
+        fault or network partition is a cascading misdiagnosis (bad action).
+        """
+        s = self.services[service_id]
+        if s.fault_active is not None:
+            return False
+        if s.latency < 150 and s.error_rate < 0.1:
+            return True
+        has_faulty_dependency = any(
+            self.services[dep_id].fault_active is not None
+            for dep_id in self.topology.dependencies(service_id)
+        )
+        return bool(has_faulty_dependency)
+
+    def is_candidate_action_bad(self, action: int) -> bool:
+        """
+        Oracle check used by the OracleGate baseline: returns True if `action`
+        is a RESTART or MIGRATE targeting a currently healthy service.
+        """
+        service_id, action_type_int = divmod(int(action), N_ACTION_TYPES)
+        action_type = ActionType(action_type_int)
+        if action_type not in (ActionType.MIGRATE, ActionType.RESTART):
+            return False
+        return self._is_service_healthy(service_id)
+
     def _compute_reward(
         self,
         churn_penalty: float,
@@ -276,16 +313,24 @@ class MicroserviceEnv(gym.Env):
         if action_type != ActionType.NOOP:
             if was_healthy and action_type in (ActionType.MIGRATE, ActionType.RESTART):
                 # Acted aggressively on something that wasn't actually broken.
-                reward -= 0.5 * (1.0 + blast_radius)  # costlier if it was a high-impact service
+                reward -= (
+                    0.5 * self.bad_action_penalty_scale * (1.0 + blast_radius)
+                )  # costlier if it was a high-impact service
                 bad_action = True
 
+        active_faults = sum(1 for s in self.services if s.fault_active is not None)
         info = {
             "availability": availability,
             "sla_violations": sla_violations,
+            "sla_violation_rate": float(sla_violations / self.n_services),
+            "downtime": 1.0 if sla_violations > 0 else 0.0,
             "avg_cpu_util": float(avg_util),
             "resource_cost": float(resource_cost),
+            "intervention_cost": float(churn_penalty),
             "bad_action": bad_action,
             "blast_radius_of_bad_action": blast_radius if bad_action else 0.0,
+            "blast_weighted_harm": blast_radius if bad_action else 0.0,
+            "active_faults": active_faults,
         }
         return float(reward), info
 

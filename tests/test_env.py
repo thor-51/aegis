@@ -52,3 +52,30 @@ def test_bad_action_flagged_when_healthy_service_migrated():
     action = 0 * N_ACTION_TYPES + ActionType.MIGRATE
     _, _, _, _, info = env.step(action)
     assert info["bad_action"] is True
+    assert info["blast_weighted_harm"] == info["blast_radius_of_bad_action"]
+    assert "intervention_cost" in info
+    assert "downtime" in info
+
+
+def test_alternative_criticality_modes():
+    for mode in ("ancestors", "traffic_weighted", "pagerank"):
+        topo = ServiceTopology(n_services=12, seed=42, criticality_mode=mode)
+        vec = topo.blast_radius_vector()
+        assert vec.shape == (12,)
+        assert np.all((vec >= 0.0) & (vec <= 1.0))
+        assert vec.max() > vec.min()
+
+
+def test_is_candidate_action_bad_oracle():
+    env = MicroserviceEnv(n_services=4, episode_length=5, seed=2)
+    env.reset(seed=2)
+    from aegis.env.microservice_env import ActionType, N_ACTION_TYPES
+
+    env.services[0].latency = 30.0
+    env.services[0].error_rate = 0.0
+    env.services[0].fault_active = None
+    assert env.is_candidate_action_bad(0 * N_ACTION_TYPES + ActionType.RESTART) is True
+    assert env.is_candidate_action_bad(0 * N_ACTION_TYPES + ActionType.SCALE_UP) is False
+
+    env.services[0].fault_active = "crash_loop"
+    assert env.is_candidate_action_bad(0 * N_ACTION_TYPES + ActionType.RESTART) is False

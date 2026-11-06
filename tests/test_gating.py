@@ -180,3 +180,43 @@ def test_aegis_agent_runs_full_episode_without_crashing():
         steps += 1
     assert steps == 15
     assert 0.0 <= agent.override_rate <= 1.0
+
+
+def test_action_shield_agent_masks_restart_on_healthy_service():
+    from aegis.agents.shield_agent import ActionShieldAgent
+    from aegis.env.microservice_env import ActionType
+
+    class _AlwaysRestartSvc0:
+        def act(self, obs):
+            return 0 * N_ACTION_TYPES + ActionType.RESTART
+
+    shield = ActionShieldAgent(_AlwaysRestartSvc0(), n_services=2)
+    # Healthy service 0: lat_norm=0.05 (< 0.15), err_rate=0.0 (< 0.10)
+    obs_healthy = np.zeros(2 * 5 + 1, dtype=np.float32)
+    obs_healthy[2] = 0.05
+    obs_healthy[3] = 0.0
+    assert shield.act(obs_healthy) == 0  # overridden to NOOP
+    assert shield.override_rate == 1.0
+
+    # Unhealthy service 0: lat_norm=0.40 (>= 0.15)
+    obs_unhealthy = np.zeros(2 * 5 + 1, dtype=np.float32)
+    obs_unhealthy[2] = 0.40
+    assert shield.act(obs_unhealthy) == 0 * N_ACTION_TYPES + ActionType.RESTART
+    assert shield.override_rate == 0.5
+
+
+def test_gate_ablation_modes():
+    policy = _agent_with_fixed_uncertainty(score=0.1, action=3)  # confident
+    topo = _topology_with_fixed_blast_radius(br=0.9)  # high blast radius
+
+    # Blast-radius-only gate overrides even when uncertainty is low
+    br_gate = AEGISGate(policy, _StubFallback(), topo, gate_mode="blast_radius_only")
+    assert br_gate.decide(np.zeros(1)).overridden is True
+
+    # Oracle gate overrides iff oracle_fn returns True
+    oracle_gate = AEGISGate(policy, _StubFallback(), topo, gate_mode="oracle", oracle_fn=lambda a: a == 3)
+    assert oracle_gate.decide(np.zeros(1)).overridden is True
+
+    # Always-fallback gate always overrides
+    af_gate = AEGISGate(policy, _StubFallback(), topo, gate_mode="always_fallback")
+    assert af_gate.decide(np.zeros(1)).overridden is True
